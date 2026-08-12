@@ -1,4 +1,4 @@
-#requires -version 5.1
+﻿#requires -version 5.1
 <#
     Edge Global Media Controls 禁用脚本
     One-click disable of Chromium/Edge Global Media Controls
@@ -51,11 +51,6 @@ $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 if (-not $isAdmin) {
-    $forwardedArgs = @()
-    if ($Undo) { $forwardedArgs += '-Undo' }
-    if ($RestartEdge) { $forwardedArgs += '-RestartEdge' }
-    if ($DisableRestartApps) { $forwardedArgs += '-DisableRestartApps' }
-
     $scriptPath = $PSCommandPath
     if ([string]::IsNullOrWhiteSpace($scriptPath)) {
         $scriptPath = $MyInvocation.MyCommand.Path
@@ -67,17 +62,21 @@ if (-not $isAdmin) {
         exit 1
     }
 
-    # PowerShell uses the backtick (`) as its escape character. A backslash
-    # is NOT a string escape character in PowerShell. The script path is quoted
-    # so spaces in paths such as D:\My Tools\... are preserved.
-    $argumentString = '-NoProfile -ExecutionPolicy Bypass -File `"' + $scriptPath + '`"'
+    $forwardedArgs = @()
+    if ($Undo) { $forwardedArgs += '-Undo' }
+    if ($RestartEdge) { $forwardedArgs += '-RestartEdge' }
+    if ($DisableRestartApps) { $forwardedArgs += '-DisableRestartApps' }
+
+    # Windows PowerShell 5.1: keep this a plain command-line string.
+    # The script path is quoted so paths containing spaces remain intact.
+    $argumentString = '-NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
 
     if ($forwardedArgs.Count -gt 0) {
         $argumentString += ' ' + ($forwardedArgs -join ' ')
     }
 
     try {
-        Start-Process -FilePath 'powershell.exe' `
+        Start-Process powershell.exe `
             -Verb RunAs `
             -WorkingDirectory (Split-Path -Parent -LiteralPath $scriptPath) `
             -ArgumentList $argumentString `
@@ -91,7 +90,7 @@ if (-not $isAdmin) {
     exit 0
 }
 
-$VERSION = '1.3.4'
+$VERSION = '1.3.5'
 $flag = '--disable-features=GlobalMediaControls'
 
 # ============================================================
@@ -386,7 +385,7 @@ if ($RestartEdge) {
     if ($procs) {
         $procs | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object { $null = $_.CloseMainWindow() }
         $deadline = (Get-Date).AddSeconds(15)
-        while ((Get-Process msedge -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
+        while ((Get-Process msedge -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 500
         }
         Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
