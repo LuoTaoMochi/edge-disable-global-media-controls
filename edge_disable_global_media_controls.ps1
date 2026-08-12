@@ -8,7 +8,7 @@ param(
     [switch]$DisableRestartApps
 )
 
-$Version = '1.4.3'
+$Version = '1.4.4'
 $Changes = New-Object System.Collections.Generic.List[string]
 
 function Add-Change {
@@ -36,11 +36,21 @@ if (-not $isAdmin) {
         exit 1
     }
 
-    # Keep the elevated PowerShell window open after the script finishes.
-    $argumentList = '-NoProfile -ExecutionPolicy Bypass -NoExit -File "' + $scriptPath + '"'
-    if ($Undo) { $argumentList += ' -Undo' }
-    if ($RestartEdge) { $argumentList += ' -RestartEdge' }
-    if ($DisableRestartApps) { $argumentList += ' -DisableRestartApps' }
+    # Run an explicit interactive PowerShell command. This is more reliable
+    # than relying on -NoExit with -File when the script is launched from Explorer.
+    $safeScriptPath = $scriptPath.Replace("'", "''")
+    $childArgs = @()
+    if ($Undo) { $childArgs += '-Undo' }
+    if ($RestartEdge) { $childArgs += '-RestartEdge' }
+    if ($DisableRestartApps) { $childArgs += '-DisableRestartApps' }
+
+    $childCommand = "& { & '$safeScriptPath'"
+    if ($childArgs.Count -gt 0) {
+        $childCommand += ' ' + ($childArgs -join ' ')
+    }
+    $childCommand += ' }'
+
+    $argumentList = '-NoProfile -ExecutionPolicy Bypass -NoExit -Command "' + $childCommand + '"'
 
     try {
         Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WorkingDirectory (Split-Path -Parent -LiteralPath $scriptPath) -ArgumentList $argumentList -ErrorAction Stop | Out-Null
@@ -266,8 +276,7 @@ if ($RestartEdge) {
     }
     $exe = Get-EdgeExe
     if ($exe) {
-        if ($Undo) { Start-Process -FilePath $exe -ArgumentList '--restore-last-session' }
-        else { Start-Process -FilePath $exe -ArgumentList "$Flag --restore-last-session" }
+        if ($Undo) { Start-Process -FilePath $exe -ArgumentList '--restore-last-session' } else { Start-Process -FilePath $exe -ArgumentList "$Flag --restore-last-session" }
         $message = 'Edge restarted.'
         Write-Host $message
         Add-Change $message
@@ -277,8 +286,7 @@ if ($RestartEdge) {
 
 Write-Host ''
 Write-Host 'Changes made:'
-if ($script:Changes.Count -eq 0) { Write-Host '  (none)' }
-else { foreach ($item in $script:Changes) { Write-Host ("  - {0}" -f $item) } }
+if ($script:Changes.Count -eq 0) { Write-Host '  (none)' } else { foreach ($item in $script:Changes) { Write-Host ("  - {0}" -f $item) } }
 Write-Host ''
 Write-Host 'Done.'
 Read-Host 'Press Enter to close' | Out-Null
