@@ -8,7 +8,7 @@ param(
     [switch]$DisableRestartApps
 )
 
-$Version = '1.4.4'
+$Version = '1.4.5'
 $Changes = New-Object System.Collections.Generic.List[string]
 
 function Add-Change {
@@ -28,32 +28,29 @@ $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 if (-not $isAdmin) {
-    $scriptPath = $PSCommandPath
-    if ([string]::IsNullOrWhiteSpace($scriptPath)) { $scriptPath = $MyInvocation.MyCommand.Path }
-    if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
-        Write-Host 'ERROR: Unable to determine the current script path.'
+    # $PSScriptRoot is the most reliable path source when this file is run as a script.
+    # Do not rely on $PSCommandPath after an elevated -Command invocation.
+    $scriptRoot = $PSScriptRoot
+    if ([string]::IsNullOrWhiteSpace($scriptRoot)) {
+        Write-Host 'ERROR: This file must be run as a .ps1 script, not pasted into the PowerShell console.'
         Read-Host 'Press Enter to close' | Out-Null
         exit 1
     }
 
-    # Run an explicit interactive PowerShell command. This is more reliable
-    # than relying on -NoExit with -File when the script is launched from Explorer.
-    $safeScriptPath = $scriptPath.Replace("'", "''")
-    $childArgs = @()
-    if ($Undo) { $childArgs += '-Undo' }
-    if ($RestartEdge) { $childArgs += '-RestartEdge' }
-    if ($DisableRestartApps) { $childArgs += '-DisableRestartApps' }
-
-    $childCommand = "& { & '$safeScriptPath'"
-    if ($childArgs.Count -gt 0) {
-        $childCommand += ' ' + ($childArgs -join ' ')
+    $scriptPath = Join-Path -Path $scriptRoot -ChildPath 'edge_disable_global_media_controls.ps1'
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        Write-Host ("ERROR: Script file not found: {0}" -f $scriptPath)
+        Read-Host 'Press Enter to close' | Out-Null
+        exit 1
     }
-    $childCommand += ' }'
 
-    $argumentList = '-NoProfile -ExecutionPolicy Bypass -NoExit -Command "' + $childCommand + '"'
+    $argumentList = '-NoProfile -ExecutionPolicy Bypass -NoExit -File "' + $scriptPath + '"'
+    if ($Undo) { $argumentList += ' -Undo' }
+    if ($RestartEdge) { $argumentList += ' -RestartEdge' }
+    if ($DisableRestartApps) { $argumentList += ' -DisableRestartApps' }
 
     try {
-        Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WorkingDirectory (Split-Path -Parent -LiteralPath $scriptPath) -ArgumentList $argumentList -ErrorAction Stop | Out-Null
+        Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -WorkingDirectory $scriptRoot -ArgumentList $argumentList -ErrorAction Stop | Out-Null
     }
     catch {
         Write-Host ("ERROR: UAC elevation failed: {0}" -f $_.Exception.Message)
