@@ -11,7 +11,8 @@
 ## 特点
 
 - 自动修改常用 Edge 快捷方式
-- 处理 Edge 的启动项和协议关联
+- 处理 Edge Startup Boost 自启动项
+- 处理 Edge 协议关联命令
 - 禁用 Edge Startup Boost，避免后台常驻进程绕过启动参数
 - 支持一键重启 Edge
 - 支持撤销修改
@@ -55,7 +56,7 @@ powershell -ExecutionPolicy Bypass -File .\edge_disable_global_media_controls.ps
 --disable-features=GlobalMediaControls
 ```
 
-不会解析、合并或删除其它 Feature 参数。因此可以与 [MSCMonster/edge-no-rounded-corners](https://github.com/MSCMonster/edge-no-rounded-corners) 同时使用。
+不会解析、合并、删除或重写其它 Feature 参数。因此可以与 [MSCMonster/edge-no-rounded-corners](https://github.com/MSCMonster/edge-no-rounded-corners) 同时使用。
 
 例如最终启动参数可以同时包含：
 
@@ -65,14 +66,16 @@ powershell -ExecutionPolicy Bypass -File .\edge_disable_global_media_controls.ps
 --disable-features=GlobalMediaControls
 ```
 
-撤销本项目时，也只会移除 `GlobalMediaControls`，不会影响圆角项目的参数。
+两个项目共享 Edge 的 `StartupBoostEnabled=0` 策略，因为它们都需要防止 Edge 先创建一个不带启动参数的后台主进程。执行本项目 `-Undo` 时，会检查圆角项目的相关参数是否仍存在；若仍在使用，则保留这个共享策略，不会主动破坏圆角项目。
+
+> 注意：如果之后手动执行圆角项目自己的 `-Undo`，它会按照它自己的逻辑撤销共享的 `StartupBoostEnabled`。两个项目同时使用时，建议不要在另一个项目仍启用的情况下单独撤销原项目的 Startup Boost 设置。
 
 ## 注意事项
 
 - 修改系统注册表和 Edge 启动项前建议关闭 Edge。
 - 某些 Edge 更新可能重新生成快捷方式或启动项，此时重新运行脚本即可。
 - 如果 Edge 已经存在后台进程，建议使用 `-RestartEdge`。
-- `-Undo` 会撤销本脚本设置的 Startup Boost 策略；如果该策略原本由其它工具设置，请先确认后再使用。
+- `-DisableRestartApps` 会修改 Windows 的全局“重新启动应用”设置，请按需使用。
 
 ## License
 
