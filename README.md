@@ -7,9 +7,8 @@ One-click disabling of Microsoft Edge / Chromium **Global Media Controls**.
 Microsoft Edge / Chromium の **Global Media Controls（グローバルメディアコントロール）** をワンクリックで無効化します。
 
 [简体中文](#简体中文) | [日本語](#日本語) | [English](#english)
-<p align="center">
-  <img src="docs/icon.png" alt="Edge Global Media Controls" width="96">
-</p>
+
+![Edge Global Media Controls](docs/icon.png)
 
 ---
 
