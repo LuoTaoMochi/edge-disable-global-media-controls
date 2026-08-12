@@ -1,39 +1,18 @@
-﻿#requires -version 5.1
-<#
-    Edge Global Media Controls 禁用脚本
-    One-click disable of Chromium/Edge Global Media Controls
+#requires -version 5.1
+<>
+    Edge Global Media Controls
+    Windows PowerShell 5.1 compatible.
 
-    作用：
-      将以下命令行特性开关注入 Edge 的常用启动入口：
+    This script is ASCII-only on purpose. Windows PowerShell 5.1 can
+    misread UTF-8 files that do not contain a BOM.
+
+    Adds:
         --disable-features=GlobalMediaControls
 
-    用法 Usage:
-      .\edge_disable_global_media_controls.ps1
-          应用修改 / apply
-
-      .\edge_disable_global_media_controls.ps1 -RestartEdge
-          应用并立即重启 Edge / apply & restart
-
-      .\edge_disable_global_media_controls.ps1 -DisableRestartApps
-          同时关闭 Windows “重新启动应用”
-
-      .\edge_disable_global_media_controls.ps1 -Undo
-          撤销本脚本修改 / revert
-
-    权限：
-      脚本会自动检测管理员权限；如果当前 PowerShell 不是管理员，
-      会通过 Windows UAC 请求提升，并以管理员权限重新启动自身。
-
-    兼容性：
-      本脚本的启动入口处理方式与 MSCMonster/edge-no-rounded-corners 保持一致：
-      快捷方式、Startup Boost、自启动项、Edge 协议关联、StartupBoostEnabled
-      以及 Windows RestartApps 均按同一思路处理。
-
-      本脚本只管理 GlobalMediaControls，不会解析、合并、删除或修改
-      msForceNoRoundedCornerAndMargin / msVisualRejuvRounding 等其它 Feature。
-
-      两个项目共享 StartupBoostEnabled=0。-Undo 时会检测圆角项目是否仍在
-      使用相关启动参数；若仍在使用，不会删除共享策略。
+    Switches:
+        -Undo
+        -RestartEdge
+        -DisableRestartApps
 #>
 
 param(
@@ -41,10 +20,6 @@ param(
     [switch]$RestartEdge,
     [switch]$DisableRestartApps
 )
-
-# ============================================================
-# Automatic UAC elevation
-# ============================================================
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -58,221 +33,117 @@ if (-not $isAdmin) {
 
     if ([string]::IsNullOrWhiteSpace($scriptPath) -or
         -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
-        Write-Error 'Unable to determine the current script path.'
+        Write-Host 'ERROR: Unable to determine the current script path.'
         exit 1
     }
 
-    $forwardedArgs = @()
-    if ($Undo) { $forwardedArgs += '-Undo' }
-    if ($RestartEdge) { $forwardedArgs += '-RestartEdge' }
-    if ($DisableRestartApps) { $forwardedArgs += '-DisableRestartApps' }
-
-    # Windows PowerShell 5.1: keep this a plain command-line string.
-    # The script path is quoted so paths containing spaces remain intact.
-    $argumentString = '-NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
-
-    if ($forwardedArgs.Count -gt 0) {
-        $argumentString += ' ' + ($forwardedArgs -join ' ')
-    }
+    $argumentList = '-NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
+    if ($Undo) { $argumentList += ' -Undo' }
+    if ($RestartEdge) { $argumentList += ' -RestartEdge' }
+    if ($DisableRestartApps) { $argumentList += ' -DisableRestartApps' }
 
     try {
-        Start-Process powershell.exe `
+        Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
             -Verb RunAs `
             -WorkingDirectory (Split-Path -Parent -LiteralPath $scriptPath) `
-            -ArgumentList $argumentString `
+            -ArgumentList $argumentList `
             -ErrorAction Stop | Out-Null
     }
     catch {
-        Write-Error ("Failed to request administrator privileges: {0}" -f $_.Exception.Message)
+        Write-Host ("ERROR: UAC elevation failed: {0}" -f $_.Exception.Message)
         exit 1
     }
 
     exit 0
 }
 
-$VERSION = '1.3.5'
-$flag = '--disable-features=GlobalMediaControls'
+$Version = '1.4.0'
+$Flag = '--disable-features=GlobalMediaControls'
+$Shell = New-Object -ComObject WScript.Shell
+$EdgeExe = $null
 
-# ============================================================
-# Localization
-# ============================================================
-
-$lang = switch -Regex ([System.Globalization.CultureInfo]::CurrentUICulture.Name) {
-    '^zh' { 'zh' }
-    '^ja' { 'ja' }
-    default { 'en' }
-}
-
-$T = (@{
-    zh = @{
-        Patched = '已修改'; Reverted = '已撤销'; AlreadyOk = '无需修改'; Failed = '修改失败'
-        Updated = '已更新'; NeedAdmin = '(需要管理员权限)'; MaybePerm = '(权限不足?)'
-        Startup = '自启动项'; Protocol = '协议命令'; Shortcut = '快捷方式'; Policy = '启动加速策略'
-        RestartApps = '登录后重启应用'
-        RestartAppsWarn = '警告: Windows "重新启动应用" 处于开启状态, 系统重启后自动恢复的 Edge 不带本参数, Global Media Controls 可能恢复(手动重开 Edge 即可消除)。运行时加 -DisableRestartApps 可关闭该功能'
-        SharedPolicy = '检测到圆角项目仍在使用 StartupBoostEnabled=0, 保留共享策略以确保兼容'
-        Restarted = 'Edge 已重启并恢复会话'; ExeNotFound = '未找到 msedge.exe, 请手动重启 Edge'; Done = '完成。'
-    }
-    ja = @{
-        Patched = '変更しました'; Reverted = '元に戻しました'; AlreadyOk = '変更不要'; Failed = '変更に失敗しました'
-        Updated = '更新しました'; NeedAdmin = '（管理者権限が必要）'; MaybePerm = '（権限不足の可能性）'
-        Startup = '自動起動エントリ'; Protocol = 'プロトコルコマンド'; Shortcut = 'ショートカット'; Policy = 'Startup Boost ポリシー'
-        RestartApps = 'サインイン後のアプリ再起動'
-        RestartAppsWarn = '警告: Windows の「アプリの再起動」が有効です。再起動後に自動復元される Edge にパラメータが付かず、Global Media Controls が復活する場合があります。-DisableRestartApps で無効化できます。'
-        SharedPolicy = '角丸プロジェクトが StartupBoostEnabled=0 を使用中のため、互換性維持のため共有ポリシーを保持します。'
-        Restarted = 'Edge を再起動し、セッションを復元しました'; ExeNotFound = 'msedge.exe が見つかりません。Edge を手動で再起動してください'; Done = '完了。'
-    }
-    en = @{
-        Patched = 'Patched'; Reverted = 'Reverted'; AlreadyOk = 'Already OK'; Failed = 'Failed'
-        Updated = 'Updated'; NeedAdmin = '(administrator rights required)'; MaybePerm = '(insufficient permissions?)'
-        Startup = 'startup entry'; Protocol = 'protocol command'; Shortcut = 'shortcut'; Policy = 'startup boost policy'
-        RestartApps = 'restart apps after sign-in'
-        RestartAppsWarn = 'Warning: Windows "restart apps after sign-in" is ON. A restored Edge process may not carry this flag, so Global Media Controls may return. Pass -DisableRestartApps to turn it off.'
-        SharedPolicy = 'The rounded-corner project still appears to use StartupBoostEnabled=0; keeping the shared policy for compatibility.'
-        Restarted = 'Edge restarted with session restored'; ExeNotFound = 'msedge.exe not found, please restart Edge manually'; Done = 'Done.'
-    }
-})[$lang]
-
-"edge_disable_global_media_controls.ps1 v$VERSION"
-
-# ============================================================
-# Our flag handling
-# ============================================================
-
-function Remove-OurFlag([string]$v) {
-    if (-not $v) { return '' }
-
-    $v = $v -replace '(?<!\S)--disable-features=GlobalMediaControls(?!\S)', ''
-    return $v.Trim()
-}
-
-function Edit-ShortcutArguments([string]$v) {
-    $clean = Remove-OurFlag $v
-    if ($Undo) { return $clean }
-    return "$flag $clean".Trim()
-}
-
-function Edit-Command([string]$v) {
-    $clean = Remove-OurFlag $v
-    if ($Undo) { return $clean }
-
-    if ($clean -match 'msedge\.exe"') {
-        return $clean.Replace('msedge.exe"', "msedge.exe`" $flag")
-    }
-
-    if ($clean -match '(?i)\bmsedge\.exe\b') {
-        return $clean -replace '(?i)(\bmsedge\.exe\b)', ('$1 ' + $flag)
-    }
-
-    return $clean
-}
-
-function Get-ActionText([string]$old) {
-    if ($Undo) { return $T.Reverted }
-    if ($old -match '(?<!\S)--disable-features=GlobalMediaControls(?!\S)') { return $T.Updated }
-    return $T.Patched
-}
-
-$edgeExe = $null
-
-# ============================================================
-# 1. Shortcuts: Desktop / Common Desktop / Taskbar / Start Menu
-# ============================================================
-
-$dirs = @(
+$ShortcutDirs = @(
     [Environment]::GetFolderPath('Desktop'),
     [Environment]::GetFolderPath('CommonDesktopDirectory'),
     "$env:APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar",
     [Environment]::GetFolderPath('Programs'),
     [Environment]::GetFolderPath('CommonPrograms')
-) | Where-Object { $_ -and (Test-Path $_) }
+) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
 
-$sh = New-Object -ComObject WScript.Shell
-foreach ($d in $dirs) {
-    foreach ($f in (Get-ChildItem $d -Filter *.lnk -Recurse -ErrorAction SilentlyContinue)) {
-        $lnk = $sh.CreateShortcut($f.FullName)
-        if ($lnk.TargetPath -notlike '*msedge.exe') { continue }
+Write-Host ""
+Write-Host "edge_disable_global_media_controls.ps1 v$Version"
+Write-Host ""
 
-        $edgeExe = $lnk.TargetPath
-        $cur = [string]$lnk.Arguments
-        $want = Edit-ShortcutArguments $cur
+function Remove-OurFlag {
+    param([AllowEmptyString()][string]$Value)
 
-        if ($cur -eq $want) {
-            "$($T.AlreadyOk): $($T.Shortcut) $($f.FullName)"
-            continue
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ''
+    }
+
+    return ($Value -replace '(?<!\S)--disable-features=GlobalMediaControls(?!\S)', '').Trim()
+}
+
+function Edit-ShortcutArgs {
+    param([AllowEmptyString()][string]$Value)
+
+    $clean = Remove-OurFlag $Value
+    if ($Undo) {
+        return $clean
+    }
+
+    return ("{0} {1}" -f $Flag, $clean).Trim()
+}
+
+function Edit-CommandLine {
+    param([AllowEmptyString()][string]$Value)
+
+    $clean = Remove-OurFlag $Value
+    if ($Undo) {
+        return $clean
+    }
+
+    $m = [regex]::Match($clean, '(?i)^(?<exe>".*?msedge\.exe"|[^\s"]*msedge\.exe)(?<rest>.*)$')
+    if ($m.Success) {
+        return ("{0} {1}{2}" -f $m.Groups['exe'].Value, $Flag, $m.Groups['rest'].Value).Trim()
+    }
+
+    return $clean
+}
+
+function Get-EdgeExe {
+    if ($script:EdgeExe -and (Test-Path -LiteralPath $script:EdgeExe)) {
+        return $script:EdgeExe
+    }
+
+    foreach ($path in @(
+        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+        "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+        "$env:LocalAppData\Microsoft\Edge\Application\msedge.exe"
+    )) {
+        if ($path -and (Test-Path -LiteralPath $path)) {
+            $script:EdgeExe = $path
+            return $path
         }
+    }
 
+    foreach ($key in @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe'
+    )) {
         try {
-            $lnk.Arguments = $want
-            $lnk.Save()
-            "$(Get-ActionText $cur): $($T.Shortcut) $($f.FullName)"
+            $path = (Get-ItemProperty -LiteralPath $key -ErrorAction Stop).'(default)'
+            if ($path -and (Test-Path -LiteralPath $path)) {
+                $script:EdgeExe = $path
+                return $path
+            }
         }
         catch {
-            "$($T.Failed) $($T.MaybePerm): $($f.FullName)"
         }
     }
+
+    return $null
 }
-
-# ============================================================
-# 2. Startup Boost autorun entries
-# ============================================================
-
-foreach ($rk in @(
-    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
-    'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
-)) {
-    if (-not (Test-Path $rk)) { continue }
-
-    foreach ($name in ((Get-Item $rk).GetValueNames() | Where-Object { $_ -like 'MicrosoftEdgeAutoLaunch*' })) {
-        $v = (Get-ItemProperty $rk -Name $name).$name
-        $want = Edit-Command ([string]$v)
-
-        if ($v -eq $want) {
-            "$($T.AlreadyOk): $($T.Startup) $name"
-            continue
-        }
-
-        try {
-            Set-ItemProperty $rk -Name $name -Value $want -ErrorAction Stop
-            "$(Get-ActionText $v): $($T.Startup) $name"
-        }
-        catch {
-            "$($T.Failed): $($T.Startup) $name - $($_.Exception.Message)"
-        }
-    }
-}
-
-# ============================================================
-# 3. Edge protocol associations
-# ============================================================
-
-foreach ($cls in @('MSEdgeHTM', 'microsoft-edge')) {
-    $key = "Registry::HKEY_CLASSES_ROOT\$cls\shell\open\command"
-    if (-not (Test-Path $key)) { continue }
-
-    $v = (Get-ItemProperty $key).'(default)'
-    $want = Edit-Command ([string]$v)
-
-    if ($v -eq $want) {
-        "$($T.AlreadyOk): $($T.Protocol) $cls"
-        continue
-    }
-
-    try {
-        Set-ItemProperty $key -Name '(default)' -Value $want -ErrorAction Stop
-        "$(Get-ActionText $v): $($T.Protocol) $cls"
-    }
-    catch {
-        "$($T.Failed) $($T.NeedAdmin): $($T.Protocol) $cls"
-    }
-}
-
-# ============================================================
-# 4. Startup Boost policy
-# ============================================================
-
-$polKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
-$polVal = (Get-ItemProperty $polKey -Name StartupBoostEnabled -ErrorAction SilentlyContinue).StartupBoostEnabled
 
 function Test-RoundedCornerProjectActive {
     $patterns = @(
@@ -281,133 +152,257 @@ function Test-RoundedCornerProjectActive {
         'msOmniboxFocusRingRoundEmphasize'
     )
 
-    foreach ($d in $dirs) {
-        foreach ($f in (Get-ChildItem $d -Filter *.lnk -Recurse -ErrorAction SilentlyContinue)) {
+    foreach ($dir in $ShortcutDirs) {
+        foreach ($file in (Get-ChildItem -LiteralPath $dir -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue)) {
             try {
-                $lnk = $sh.CreateShortcut($f.FullName)
-                if ($lnk.TargetPath -notlike '*msedge.exe') { continue }
-                foreach ($p in $patterns) {
-                    if ([string]$lnk.Arguments -like "*$p*") { return $true }
+                $link = $Shell.CreateShortcut($file.FullName)
+                if ($link.TargetPath -notlike '*msedge.exe') { continue }
+
+                foreach ($pattern in $patterns) {
+                    if ([string]$link.Arguments -like "*$pattern*") {
+                        return $true
+                    }
                 }
-            } catch { }
+            }
+            catch {
+            }
         }
     }
 
-    foreach ($rk in @(
+    foreach ($root in @(
         'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
         'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
     )) {
-        if (-not (Test-Path $rk)) { continue }
-        foreach ($name in ((Get-Item $rk).GetValueNames() | Where-Object { $_ -like 'MicrosoftEdgeAutoLaunch*' })) {
-            $v = [string]((Get-ItemProperty $rk -Name $name).$name)
-            foreach ($p in $patterns) {
-                if ($v -like "*$p*") { return $true }
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+
+        foreach ($name in ((Get-Item -LiteralPath $root).GetValueNames() |
+            Where-Object { $_ -like 'MicrosoftEdgeAutoLaunch*' })) {
+            try {
+                $value = [string](Get-ItemProperty -LiteralPath $root -Name $name).$name
+                foreach ($pattern in $patterns) {
+                    if ($value -like "*$pattern*") { return $true }
+                }
+            }
+            catch {
             }
         }
     }
 
-    foreach ($cls in @('MSEdgeHTM', 'microsoft-edge')) {
-        $key = "Registry::HKEY_CLASSES_ROOT\$cls\shell\open\command"
-        if (-not (Test-Path $key)) { continue }
+    foreach ($className in @('MSEdgeHTM', 'microsoft-edge', 'microsoft-edge-holographic')) {
+        $key = "Registry::HKEY_CLASSES_ROOT\$className\shell\open\command"
+        if (-not (Test-Path -LiteralPath $key)) { continue }
+
         try {
-            $v = [string](Get-ItemProperty $key).'(default)'
-            foreach ($p in $patterns) {
-                if ($v -like "*$p*") { return $true }
+            $value = [string](Get-ItemProperty -LiteralPath $key).'(default)'
+            foreach ($pattern in $patterns) {
+                if ($value -like "*$pattern*") { return $true }
             }
-        } catch { }
+        }
+        catch {
+        }
     }
 
     return $false
 }
 
-if ($Undo) {
-    if ($null -eq $polVal) {
-        "$($T.AlreadyOk): $($T.Policy)"
-    }
-    elseif (Test-RoundedCornerProjectActive) {
-        $T.SharedPolicy
-    }
-    else {
+# Shortcuts
+foreach ($dir in $ShortcutDirs) {
+    foreach ($file in (Get-ChildItem -LiteralPath $dir -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue)) {
         try {
-            Remove-ItemProperty $polKey -Name StartupBoostEnabled -ErrorAction Stop
-            "$($T.Reverted): $($T.Policy) StartupBoostEnabled"
+            $link = $Shell.CreateShortcut($file.FullName)
+            if ($link.TargetPath -notlike '*msedge.exe') { continue }
+
+            $script:EdgeExe = $link.TargetPath
+            $old = [string]$link.Arguments
+            $new = Edit-ShortcutArgs $old
+
+            if ($old -eq $new) {
+                Write-Host ("Already OK: shortcut {0}" -f $file.FullName)
+                continue
+            }
+
+            $link.Arguments = $new
+            $link.Save()
+
+            if ($Undo) {
+                Write-Host ("Reverted: shortcut {0}" -f $file.FullName)
+            }
+            else {
+                Write-Host ("Patched: shortcut {0}" -f $file.FullName)
+            }
         }
         catch {
-            "$($T.Failed) $($T.NeedAdmin): $($T.Policy)"
+            Write-Host ("Failed: shortcut {0} - {1}" -f $file.FullName, $_.Exception.Message)
         }
     }
 }
-elseif ($polVal -eq 0) {
-    "$($T.AlreadyOk): $($T.Policy)"
+
+# Startup Boost autorun entries
+foreach ($root in @(
+    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+    'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+)) {
+    if (-not (Test-Path -LiteralPath $root)) { continue }
+
+    foreach ($name in ((Get-Item -LiteralPath $root).GetValueNames() |
+        Where-Object { $_ -like 'MicrosoftEdgeAutoLaunch*' })) {
+        try {
+            $old = [string](Get-ItemProperty -LiteralPath $root -Name $name).$name
+            $new = Edit-CommandLine $old
+
+            if ($old -eq $new) {
+                Write-Host ("Already OK: startup entry {0}" -f $name)
+                continue
+            }
+
+            Set-ItemProperty -LiteralPath $root -Name $name -Value $new -ErrorAction Stop
+
+            if ($Undo) {
+                Write-Host ("Reverted: startup entry {0}" -f $name)
+            }
+            else {
+                Write-Host ("Patched: startup entry {0}" -f $name)
+            }
+        }
+        catch {
+            Write-Host ("Failed: startup entry {0} - {1}" -f $name, $_.Exception.Message)
+        }
+    }
+}
+
+# Protocol associations
+foreach ($className in @('MSEdgeHTM', 'microsoft-edge', 'microsoft-edge-holographic')) {
+    $key = "Registry::HKEY_CLASSES_ROOT\$className\shell\open\command"
+    if (-not (Test-Path -LiteralPath $key)) { continue }
+
+    try {
+        $old = [string](Get-ItemProperty -LiteralPath $key).'(default)'
+        $new = Edit-CommandLine $old
+
+        if ($old -eq $new) {
+            Write-Host ("Already OK: protocol {0}" -f $className)
+            continue
+        }
+
+        Set-ItemProperty -LiteralPath $key -Name '(default)' -Value $new -ErrorAction Stop
+
+        if ($Undo) {
+            Write-Host ("Reverted: protocol {0}" -f $className)
+        }
+        else {
+            Write-Host ("Patched: protocol {0}" -f $className)
+        }
+    }
+    catch {
+        Write-Host ("Failed: protocol {0} - {1}" -f $className, $_.Exception.Message)
+    }
+}
+
+# Startup Boost policy
+$policyKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+$policyValue = $null
+try {
+    $policyValue = (Get-ItemProperty -LiteralPath $policyKey -Name StartupBoostEnabled -ErrorAction Stop).StartupBoostEnabled
+}
+catch {
+}
+
+if ($Undo) {
+    if ($null -eq $policyValue) {
+        Write-Host 'Already OK: StartupBoostEnabled is not set.'
+    }
+    elseif (Test-RoundedCornerProjectActive) {
+        Write-Host 'Keeping StartupBoostEnabled=0 because the rounded-corner project still appears to use it.'
+    }
+    else {
+        try {
+            Remove-ItemProperty -LiteralPath $policyKey -Name StartupBoostEnabled -ErrorAction Stop
+            Write-Host 'Reverted: StartupBoostEnabled'
+        }
+        catch {
+            Write-Host ("Failed: StartupBoostEnabled - {0}" -f $_.Exception.Message)
+        }
+    }
+}
+elseif ($policyValue -eq 0) {
+    Write-Host 'Already OK: StartupBoostEnabled=0'
 }
 else {
     try {
-        if (-not (Test-Path $polKey)) {
-            New-Item $polKey -Force -ErrorAction Stop | Out-Null
+        if (-not (Test-Path -LiteralPath $policyKey)) {
+            New-Item -Path $policyKey -Force -ErrorAction Stop | Out-Null
         }
-        Set-ItemProperty $polKey -Name StartupBoostEnabled -Value 0 -Type DWord -ErrorAction Stop
-        "$($T.Patched): $($T.Policy) StartupBoostEnabled=0"
+        Set-ItemProperty -LiteralPath $policyKey -Name StartupBoostEnabled -Value 0 -Type DWord -ErrorAction Stop
+        Write-Host 'Patched: StartupBoostEnabled=0'
     }
     catch {
-        "$($T.Failed) $($T.NeedAdmin): $($T.Policy)"
+        Write-Host ("Failed: StartupBoostEnabled - {0}" -f $_.Exception.Message)
     }
 }
 
-# ============================================================
-# 5. Windows "Restart apps after sign-in"
-# ============================================================
+# Windows RestartApps
+$winlogonKey = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon'
+$restartApps = $null
+try {
+    $restartApps = (Get-ItemProperty -LiteralPath $winlogonKey -Name RestartApps -ErrorAction Stop).RestartApps
+}
+catch {
+}
 
-$wlKey = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon'
-$ra = (Get-ItemProperty $wlKey -Name RestartApps -ErrorAction SilentlyContinue).RestartApps
-
-if (-not $Undo -and $ra -eq 1) {
+if (-not $Undo -and $restartApps -eq 1) {
     if ($DisableRestartApps) {
         try {
-            Set-ItemProperty $wlKey -Name RestartApps -Value 0 -Type DWord -ErrorAction Stop
-            "$($T.Patched): $($T.RestartApps) RestartApps=0"
+            Set-ItemProperty -LiteralPath $winlogonKey -Name RestartApps -Value 0 -Type DWord -ErrorAction Stop
+            Write-Host 'Patched: Windows RestartApps=0'
         }
         catch {
-            "$($T.Failed): $($T.RestartApps)"
+            Write-Host ("Failed: Windows RestartApps - {0}" -f $_.Exception.Message)
         }
     }
     else {
-        $T.RestartAppsWarn
+        Write-Host 'Warning: Windows RestartApps is enabled.'
+        Write-Host 'Use -DisableRestartApps to disable it.'
     }
 }
 
-# ============================================================
-# 6. Optional immediate Edge restart
-# ============================================================
-
+# Optional Edge restart
 if ($RestartEdge) {
-    $procs = Get-Process msedge -ErrorAction SilentlyContinue
+    Write-Host 'Restarting Edge...'
 
-    if ($procs) {
-        $procs | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object { $null = $_.CloseMainWindow() }
+    $processes = Get-Process -Name msedge -ErrorAction SilentlyContinue
+    if ($processes) {
+        $processes |
+            Where-Object { $_.MainWindowHandle -ne 0 } |
+            ForEach-Object { $null = $_.CloseMainWindow() }
+
         $deadline = (Get-Date).AddSeconds(15)
-        while ((Get-Process msedge -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+        while (
+            (Get-Process -Name msedge -ErrorAction SilentlyContinue) -and
+            ((Get-Date) -lt $deadline)
+        ) {
             Start-Sleep -Milliseconds 500
         }
-        Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
+
+        Get-Process -Name msedge -ErrorAction SilentlyContinue |
+            Stop-Process -Force -Confirm:$false
+
         Start-Sleep -Seconds 2
     }
 
-    if (-not $edgeExe) {
-        $edgeExe = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe' -ErrorAction SilentlyContinue).'(default)'
-    }
-
-    if (-not $edgeExe) {
-        $edgeExe = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe' -ErrorAction SilentlyContinue).'(default)'
-    }
-
-    if ($edgeExe -and (Test-Path $edgeExe)) {
-        $restartArgs = if ($Undo) { '--restore-last-session' } else { "$flag --restore-last-session" }
-        Start-Process $edgeExe -ArgumentList $restartArgs
-        $T.Restarted
+    $exe = Get-EdgeExe
+    if ($exe) {
+        if ($Undo) {
+            Start-Process -FilePath $exe -ArgumentList '--restore-last-session'
+        }
+        else {
+            Start-Process -FilePath $exe -ArgumentList "$Flag --restore-last-session"
+        }
+        Write-Host 'Edge restarted.'
     }
     else {
-        $T.ExeNotFound
+        Write-Host 'ERROR: msedge.exe could not be located.'
     }
 }
 
-$T.Done
+Write-Host ''
+Write-Host 'Done.'
