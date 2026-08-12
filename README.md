@@ -1,4 +1,4 @@
-# edge-disable-global-media-controls
+# （此项目现已无效）edge-disable-global-media-controls
 
 一键禁用 Microsoft Edge / Chromium 的 **Global Media Controls（全局媒体控制）**。
 
