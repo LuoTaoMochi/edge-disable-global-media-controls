@@ -1,0 +1,10 @@
+# Windows
+Thumbs.db
+Desktop.ini
+
+# PowerShell / editor temporary files
+*.bak
+*.tmp
+*.swp
+.vscode/
+.idea/
