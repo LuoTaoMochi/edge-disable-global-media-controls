@@ -7,7 +7,7 @@
       将以下命令行特性开关注入 Edge 的常用启动入口：
         --disable-features=GlobalMediaControls
 
-    用法 Usage (建议管理员 PowerShell / run as Administrator):
+    用法 Usage:
       .\edge_disable_global_media_controls.ps1
           应用修改 / apply
 
@@ -19,6 +19,10 @@
 
       .\edge_disable_global_media_controls.ps1 -Undo
           撤销本脚本修改 / revert
+
+    权限：
+      脚本会自动检测管理员权限；如果当前 PowerShell 不是管理员，
+      会通过 Windows UAC 请求提升，并以管理员权限重新启动自身。
 
     兼容性：
       本脚本的启动入口处理方式与 MSCMonster/edge-no-rounded-corners 保持一致：
@@ -38,7 +42,45 @@ param(
     [switch]$DisableRestartApps
 )
 
-$VERSION = '1.2.0'
+# ============================================================
+# Automatic UAC elevation
+# ============================================================
+
+# Most registry/protocol/policy changes require administrator rights.
+# Elevate only when necessary, using the normal Windows UAC consent dialog.
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).
+    IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    $forwardedArgs = @()
+    if ($Undo) { $forwardedArgs += '-Undo' }
+    if ($RestartEdge) { $forwardedArgs += '-RestartEdge' }
+    if ($DisableRestartApps) { $forwardedArgs += '-DisableRestartApps' }
+
+    $scriptPath = $MyInvocation.MyCommand.Path
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+        Write-Error 'Unable to determine the script path. Please run the .ps1 file directly.'
+        exit 1
+    }
+
+    # Quote the script path because it may contain spaces.
+    $argumentString = '-NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath.Replace('"', '\"') + '"'
+    if ($forwardedArgs.Count -gt 0) {
+        $argumentString += ' ' + ($forwardedArgs -join ' ')
+    }
+
+    try {
+        Start-Process powershell.exe -Verb RunAs -ArgumentList $argumentString -ErrorAction Stop | Out-Null
+    }
+    catch {
+        Write-Error 'Administrator permission is required. The UAC prompt was cancelled or elevation failed.'
+        exit 1
+    }
+
+    exit 0
+}
+
+$VERSION = '1.3.0'
 $flag = '--disable-features=GlobalMediaControls'
 
 # ============================================================
