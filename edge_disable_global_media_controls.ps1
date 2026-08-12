@@ -46,48 +46,63 @@ param(
 # Automatic UAC elevation
 # ============================================================
 
-# Most registry/protocol/policy changes require administrator rights.
-# Elevate only when necessary, using the normal Windows UAC consent dialog.
-$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).
-    IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$isAdmin = ([Security.Principal.WindowsPrincipal](
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+)).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator
+)
 
 if (-not $isAdmin) {
+    # Rebuild only the switches understood by this script.
+    # This avoids forwarding arbitrary/unexpected command-line text.
     $forwardedArgs = @()
     if ($Undo) { $forwardedArgs += '-Undo' }
     if ($RestartEdge) { $forwardedArgs += '-RestartEdge' }
     if ($DisableRestartApps) { $forwardedArgs += '-DisableRestartApps' }
 
     $scriptPath = $PSCommandPath
-    if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath)) {
-        Write-Error 'Unable to determine the current script path. Please run the .ps1 file directly.'
+
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+        $scriptPath = $MyInvocation.MyCommand.Path
+    }
+
+    if ([string]::IsNullOrWhiteSpace($scriptPath) -or
+        -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        Write-Error 'Unable to determine the current script path.'
         exit 1
     }
 
-    # Start-Process joins -ArgumentList into one command line. Explicitly quote
-    # the script path so paths containing spaces remain intact.
-    $escapedScriptPath = $scriptPath.Replace('"', '\"')
-    $argumentString = '-NoProfile -ExecutionPolicy Bypass -File "' + $escapedScriptPath + '"'
+    # IMPORTANT:
+    # Start-Process uses Windows command-line parsing. The script path must be
+    # passed as one quoted argument. Windows file paths cannot contain quotes.
+    $quotedScriptPath = '"' + $scriptPath + '"'
 
-    if ($forwardedArgs.Count -gt 0) {
-        $argumentString += ' ' + ($forwardedArgs -join ' ')
-    }
+    $argumentList = @(
+        '-NoProfile'
+        '-ExecutionPolicy'
+        'Bypass'
+        '-File'
+        $quotedScriptPath
+    ) + $forwardedArgs
 
     try {
-        Start-Process powershell.exe `
+        Start-Process `
+            -FilePath 'powershell.exe' `
             -Verb RunAs `
-            -WorkingDirectory (Split-Path -Parent $scriptPath) `
-            -ArgumentList $argumentString `
+            -WorkingDirectory (Split-Path -Parent -LiteralPath $scriptPath) `
+            -ArgumentList $argumentList `
             -ErrorAction Stop | Out-Null
+
+        # The elevated process is now responsible for all actual work.
+        exit 0
     }
     catch {
-        Write-Error 'Administrator permission is required. The UAC prompt was cancelled or elevation failed.'
+        Write-Error ("Failed to request administrator privileges: {0}" -f $_.Exception.Message)
         exit 1
     }
-
-    exit 0
 }
 
-$VERSION = '1.3.1'
+$VERSION = '1.3.2'
 $flag = '--disable-features=GlobalMediaControls'
 
 # ============================================================
