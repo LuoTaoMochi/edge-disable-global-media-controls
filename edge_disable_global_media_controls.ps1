@@ -8,7 +8,15 @@ param(
     [switch]$DisableRestartApps
 )
 
-$Version = '1.4.1'
+$Version = '1.4.2'
+$Changes = New-Object System.Collections.Generic.List[string]
+
+function Add-Change {
+    param([string]$Text)
+    if (-not [string]::IsNullOrWhiteSpace($Text)) {
+        [void]$script:Changes.Add($Text)
+    }
+}
 $Flag = '--disable-features=GlobalMediaControls'
 $Shell = New-Object -ComObject WScript.Shell
 $script:EdgeExe = $null
@@ -143,7 +151,14 @@ foreach ($dir in $ShortcutDirs) {
             if ($old -eq $new) { Write-Host ("Already OK: shortcut {0}" -f $file.FullName); continue }
             $link.Arguments = $new
             $link.Save()
-            if ($Undo) { Write-Host ("Reverted: shortcut {0}" -f $file.FullName) } else { Write-Host ("Patched: shortcut {0}" -f $file.FullName) }
+            if ($Undo) {
+                $message = ("Reverted: shortcut {0}" -f $file.FullName)
+            }
+            else {
+                $message = ("Patched: shortcut {0}" -f $file.FullName)
+            }
+            Write-Host $message
+            Add-Change $message
         }
         catch { Write-Host ("Failed: shortcut {0} - {1}" -f $file.FullName, $_.Exception.Message) }
     }
@@ -158,7 +173,14 @@ foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run','HKLM:
             $new = Edit-CommandLine $old
             if ($old -eq $new) { Write-Host ("Already OK: startup entry {0}" -f $name); continue }
             Set-ItemProperty -LiteralPath $root -Name $name -Value $new -ErrorAction Stop
-            if ($Undo) { Write-Host ("Reverted: startup entry {0}" -f $name) } else { Write-Host ("Patched: startup entry {0}" -f $name) }
+            if ($Undo) {
+                $message = ("Reverted: startup entry {0}" -f $name)
+            }
+            else {
+                $message = ("Patched: startup entry {0}" -f $name)
+            }
+            Write-Host $message
+            Add-Change $message
         }
         catch { Write-Host ("Failed: startup entry {0} - {1}" -f $name, $_.Exception.Message) }
     }
@@ -173,7 +195,14 @@ foreach ($className in @('MSEdgeHTM','microsoft-edge','microsoft-edge-holographi
         $new = Edit-CommandLine $old
         if ($old -eq $new) { Write-Host ("Already OK: protocol {0}" -f $className); continue }
         Set-ItemProperty -LiteralPath $key -Name '(default)' -Value $new -ErrorAction Stop
-        if ($Undo) { Write-Host ("Reverted: protocol {0}" -f $className) } else { Write-Host ("Patched: protocol {0}" -f $className) }
+        if ($Undo) {
+            $message = ("Reverted: protocol {0}" -f $className)
+        }
+        else {
+            $message = ("Patched: protocol {0}" -f $className)
+        }
+        Write-Host $message
+        Add-Change $message
     }
     catch { Write-Host ("Failed: protocol {0} - {1}" -f $className, $_.Exception.Message) }
 }
@@ -191,7 +220,12 @@ if ($Undo) {
         Write-Host 'Keeping StartupBoostEnabled=0 for compatibility with the rounded-corner project.'
     }
     else {
-        try { Remove-ItemProperty -LiteralPath $policyKey -Name StartupBoostEnabled -ErrorAction Stop; Write-Host 'Reverted: StartupBoostEnabled' }
+        try {
+            Remove-ItemProperty -LiteralPath $policyKey -Name StartupBoostEnabled -ErrorAction Stop
+            $message = 'Reverted: StartupBoostEnabled'
+            Write-Host $message
+            Add-Change $message
+        }
         catch { Write-Host ("Failed: StartupBoostEnabled - {0}" -f $_.Exception.Message) }
     }
 }
@@ -202,7 +236,9 @@ else {
     try {
         if (-not (Test-Path -LiteralPath $policyKey)) { New-Item -Path $policyKey -Force -ErrorAction Stop | Out-Null }
         Set-ItemProperty -LiteralPath $policyKey -Name StartupBoostEnabled -Value 0 -Type DWord -ErrorAction Stop
-        Write-Host 'Patched: StartupBoostEnabled=0'
+        $message = 'Patched: StartupBoostEnabled=0'
+        Write-Host $message
+        Add-Change $message
     }
     catch { Write-Host ("Failed: StartupBoostEnabled - {0}" -f $_.Exception.Message) }
 }
@@ -214,7 +250,12 @@ try { $restartApps = (Get-ItemProperty -LiteralPath $winlogonKey -Name RestartAp
 
 if (-not $Undo -and $restartApps -eq 1) {
     if ($DisableRestartApps) {
-        try { Set-ItemProperty -LiteralPath $winlogonKey -Name RestartApps -Value 0 -Type DWord -ErrorAction Stop; Write-Host 'Patched: Windows RestartApps=0' }
+        try {
+            Set-ItemProperty -LiteralPath $winlogonKey -Name RestartApps -Value 0 -Type DWord -ErrorAction Stop
+            $message = 'Patched: Windows RestartApps=0'
+            Write-Host $message
+            Add-Change $message
+        }
         catch { Write-Host ("Failed: Windows RestartApps - {0}" -f $_.Exception.Message) }
     }
     else {
@@ -238,10 +279,23 @@ if ($RestartEdge) {
     if ($exe) {
         if ($Undo) { Start-Process -FilePath $exe -ArgumentList '--restore-last-session' }
         else { Start-Process -FilePath $exe -ArgumentList "$Flag --restore-last-session" }
-        Write-Host 'Edge restarted.'
+        $message = 'Edge restarted.'
+        Write-Host $message
+        Add-Change $message
     }
     else { Write-Host 'ERROR: msedge.exe could not be located.' }
 }
 
 Write-Host ''
+Write-Host 'Changes made:'
+if ($script:Changes.Count -eq 0) {
+    Write-Host '  (none)'
+}
+else {
+    foreach ($item in $script:Changes) {
+        Write-Host ("  - {0}" -f $item)
+    }
+}
+Write-Host ''
 Write-Host 'Done.'
+Read-Host 'Press Enter to close' | Out-Null
