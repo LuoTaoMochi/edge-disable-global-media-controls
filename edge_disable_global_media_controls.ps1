@@ -46,22 +46,17 @@ param(
 # Automatic UAC elevation
 # ============================================================
 
-$isAdmin = ([Security.Principal.WindowsPrincipal](
-    [Security.Principal.WindowsIdentity]::GetCurrent()
-)).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator
-)
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($identity)
+$isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 if (-not $isAdmin) {
-    # Rebuild only the switches understood by this script.
-    # This avoids forwarding arbitrary/unexpected command-line text.
     $forwardedArgs = @()
     if ($Undo) { $forwardedArgs += '-Undo' }
     if ($RestartEdge) { $forwardedArgs += '-RestartEdge' }
     if ($DisableRestartApps) { $forwardedArgs += '-DisableRestartApps' }
 
     $scriptPath = $PSCommandPath
-
     if ([string]::IsNullOrWhiteSpace($scriptPath)) {
         $scriptPath = $MyInvocation.MyCommand.Path
     }
@@ -72,37 +67,31 @@ if (-not $isAdmin) {
         exit 1
     }
 
-    # IMPORTANT:
-    # Start-Process uses Windows command-line parsing. The script path must be
-    # passed as one quoted argument. Windows file paths cannot contain quotes.
-    $quotedScriptPath = '"' + $scriptPath + '"'
+    # PowerShell uses the backtick (`) as its escape character. A backslash
+    # is NOT a string escape character in PowerShell. The script path is quoted
+    # so spaces in paths such as D:\My Tools\... are preserved.
+    $argumentString = '-NoProfile -ExecutionPolicy Bypass -File `"' + $scriptPath + '`"'
 
-    $argumentList = @(
-        '-NoProfile'
-        '-ExecutionPolicy'
-        'Bypass'
-        '-File'
-        $quotedScriptPath
-    ) + $forwardedArgs
+    if ($forwardedArgs.Count -gt 0) {
+        $argumentString += ' ' + ($forwardedArgs -join ' ')
+    }
 
     try {
-        Start-Process `
-            -FilePath 'powershell.exe' `
+        Start-Process -FilePath 'powershell.exe' `
             -Verb RunAs `
             -WorkingDirectory (Split-Path -Parent -LiteralPath $scriptPath) `
-            -ArgumentList $argumentList `
+            -ArgumentList $argumentString `
             -ErrorAction Stop | Out-Null
-
-        # The elevated process is now responsible for all actual work.
-        exit 0
     }
     catch {
         Write-Error ("Failed to request administrator privileges: {0}" -f $_.Exception.Message)
         exit 1
     }
+
+    exit 0
 }
 
-$VERSION = '1.3.2'
+$VERSION = '1.3.4'
 $flag = '--disable-features=GlobalMediaControls'
 
 # ============================================================
@@ -154,9 +143,6 @@ $T = (@{
 function Remove-OurFlag([string]$v) {
     if (-not $v) { return '' }
 
-    # IMPORTANT:
-    # Remove ONLY our exact standalone flag.
-    # Do not parse or rewrite any other --disable-features argument.
     $v = $v -replace '(?<!\S)--disable-features=GlobalMediaControls(?!\S)', ''
     return $v.Trim()
 }
@@ -171,12 +157,10 @@ function Edit-Command([string]$v) {
     $clean = Remove-OurFlag $v
     if ($Undo) { return $clean }
 
-    # Match the original project's placement: executable first, then arguments.
     if ($clean -match 'msedge\.exe"') {
         return $clean.Replace('msedge.exe"', "msedge.exe`" $flag")
     }
 
-    # Conservative fallback for an unquoted executable path.
     if ($clean -match '(?i)\bmsedge\.exe\b') {
         return $clean -replace '(?i)(\bmsedge\.exe\b)', ('$1 ' + $flag)
     }
@@ -261,7 +245,6 @@ foreach ($rk in @(
 
 # ============================================================
 # 3. Edge protocol associations
-#    Same classes as edge-no-rounded-corners.
 # ============================================================
 
 foreach ($cls in @('MSEdgeHTM', 'microsoft-edge')) {
@@ -287,7 +270,6 @@ foreach ($cls in @('MSEdgeHTM', 'microsoft-edge')) {
 
 # ============================================================
 # 4. Startup Boost policy
-#    This policy is shared with edge-no-rounded-corners.
 # ============================================================
 
 $polKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
@@ -402,10 +384,9 @@ if ($RestartEdge) {
     $procs = Get-Process msedge -ErrorAction SilentlyContinue
 
     if ($procs) {
-        # Graceful close first so the session can be saved, then terminate leftovers.
         $procs | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object { $null = $_.CloseMainWindow() }
         $deadline = (Get-Date).AddSeconds(15)
-        while ((Get-Process msedge -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {
+        while ((Get-Process msedge -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
             Start-Sleep -Milliseconds 500
         }
         Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
