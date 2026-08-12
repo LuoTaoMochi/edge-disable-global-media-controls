@@ -1,0 +1,1 @@
+# Fixed PowerShell syntax and UAC helper; use edge_disable_global_media_controls.ps1 from main.
