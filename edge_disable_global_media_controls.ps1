@@ -8,7 +8,7 @@ param(
     [switch]$DisableRestartApps
 )
 
-$Version = '1.4.2'
+$Version = '1.4.3'
 $Changes = New-Object System.Collections.Generic.List[string]
 
 function Add-Change {
@@ -17,6 +17,7 @@ function Add-Change {
         [void]$script:Changes.Add($Text)
     }
 }
+
 $Flag = '--disable-features=GlobalMediaControls'
 $Shell = New-Object -ComObject WScript.Shell
 $script:EdgeExe = $null
@@ -31,10 +32,12 @@ if (-not $isAdmin) {
     if ([string]::IsNullOrWhiteSpace($scriptPath)) { $scriptPath = $MyInvocation.MyCommand.Path }
     if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
         Write-Host 'ERROR: Unable to determine the current script path.'
+        Read-Host 'Press Enter to close' | Out-Null
         exit 1
     }
 
-    $argumentList = '-NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
+    # Keep the elevated PowerShell window open after the script finishes.
+    $argumentList = '-NoProfile -ExecutionPolicy Bypass -NoExit -File "' + $scriptPath + '"'
     if ($Undo) { $argumentList += ' -Undo' }
     if ($RestartEdge) { $argumentList += ' -RestartEdge' }
     if ($DisableRestartApps) { $argumentList += ' -DisableRestartApps' }
@@ -44,6 +47,7 @@ if (-not $isAdmin) {
     }
     catch {
         Write-Host ("ERROR: UAC elevation failed: {0}" -f $_.Exception.Message)
+        Read-Host 'Press Enter to close' | Out-Null
         exit 1
     }
     exit 0
@@ -151,12 +155,7 @@ foreach ($dir in $ShortcutDirs) {
             if ($old -eq $new) { Write-Host ("Already OK: shortcut {0}" -f $file.FullName); continue }
             $link.Arguments = $new
             $link.Save()
-            if ($Undo) {
-                $message = ("Reverted: shortcut {0}" -f $file.FullName)
-            }
-            else {
-                $message = ("Patched: shortcut {0}" -f $file.FullName)
-            }
+            if ($Undo) { $message = ("Reverted: shortcut {0}" -f $file.FullName) } else { $message = ("Patched: shortcut {0}" -f $file.FullName) }
             Write-Host $message
             Add-Change $message
         }
@@ -173,12 +172,7 @@ foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run','HKLM:
             $new = Edit-CommandLine $old
             if ($old -eq $new) { Write-Host ("Already OK: startup entry {0}" -f $name); continue }
             Set-ItemProperty -LiteralPath $root -Name $name -Value $new -ErrorAction Stop
-            if ($Undo) {
-                $message = ("Reverted: startup entry {0}" -f $name)
-            }
-            else {
-                $message = ("Patched: startup entry {0}" -f $name)
-            }
+            if ($Undo) { $message = ("Reverted: startup entry {0}" -f $name) } else { $message = ("Patched: startup entry {0}" -f $name) }
             Write-Host $message
             Add-Change $message
         }
@@ -195,12 +189,7 @@ foreach ($className in @('MSEdgeHTM','microsoft-edge','microsoft-edge-holographi
         $new = Edit-CommandLine $old
         if ($old -eq $new) { Write-Host ("Already OK: protocol {0}" -f $className); continue }
         Set-ItemProperty -LiteralPath $key -Name '(default)' -Value $new -ErrorAction Stop
-        if ($Undo) {
-            $message = ("Reverted: protocol {0}" -f $className)
-        }
-        else {
-            $message = ("Patched: protocol {0}" -f $className)
-        }
+        if ($Undo) { $message = ("Reverted: protocol {0}" -f $className) } else { $message = ("Patched: protocol {0}" -f $className) }
         Write-Host $message
         Add-Change $message
     }
@@ -288,14 +277,8 @@ if ($RestartEdge) {
 
 Write-Host ''
 Write-Host 'Changes made:'
-if ($script:Changes.Count -eq 0) {
-    Write-Host '  (none)'
-}
-else {
-    foreach ($item in $script:Changes) {
-        Write-Host ("  - {0}" -f $item)
-    }
-}
+if ($script:Changes.Count -eq 0) { Write-Host '  (none)' }
+else { foreach ($item in $script:Changes) { Write-Host ("  - {0}" -f $item) } }
 Write-Host ''
 Write-Host 'Done.'
 Read-Host 'Press Enter to close' | Out-Null
