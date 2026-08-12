@@ -57,20 +57,27 @@ if (-not $isAdmin) {
     if ($RestartEdge) { $forwardedArgs += '-RestartEdge' }
     if ($DisableRestartApps) { $forwardedArgs += '-DisableRestartApps' }
 
-    $scriptPath = $MyInvocation.MyCommand.Path
-    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
-        Write-Error 'Unable to determine the script path. Please run the .ps1 file directly.'
+    $scriptPath = $PSCommandPath
+    if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath)) {
+        Write-Error 'Unable to determine the current script path. Please run the .ps1 file directly.'
         exit 1
     }
 
-    # Quote the script path because it may contain spaces.
-    $argumentString = '-NoProfile -ExecutionPolicy Bypass -File "' + $scriptPath.Replace('"', '\"') + '"'
+    # Start-Process joins -ArgumentList into one command line. Explicitly quote
+    # the script path so paths containing spaces remain intact.
+    $escapedScriptPath = $scriptPath.Replace('"', '\"')
+    $argumentString = '-NoProfile -ExecutionPolicy Bypass -File "' + $escapedScriptPath + '"'
+
     if ($forwardedArgs.Count -gt 0) {
         $argumentString += ' ' + ($forwardedArgs -join ' ')
     }
 
     try {
-        Start-Process powershell.exe -Verb RunAs -ArgumentList $argumentString -ErrorAction Stop | Out-Null
+        Start-Process powershell.exe `
+            -Verb RunAs `
+            -WorkingDirectory (Split-Path -Parent $scriptPath) `
+            -ArgumentList $argumentString `
+            -ErrorAction Stop | Out-Null
     }
     catch {
         Write-Error 'Administrator permission is required. The UAC prompt was cancelled or elevation failed.'
@@ -80,7 +87,7 @@ if (-not $isAdmin) {
     exit 0
 }
 
-$VERSION = '1.3.0'
+$VERSION = '1.3.1'
 $flag = '--disable-features=GlobalMediaControls'
 
 # ============================================================
