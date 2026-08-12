@@ -27,6 +27,9 @@
 
       本脚本只管理 GlobalMediaControls，不会解析、合并、删除或修改
       msForceNoRoundedCornerAndMargin / msVisualRejuvRounding 等其它 Feature。
+
+      两个项目共享 StartupBoostEnabled=0。-Undo 时会检测圆角项目是否仍在
+      使用相关启动参数；若仍在使用，不会删除共享策略。
 #>
 
 param(
@@ -35,7 +38,7 @@ param(
     [switch]$DisableRestartApps
 )
 
-$VERSION = '1.1.0'
+$VERSION = '1.2.0'
 $flag = '--disable-features=GlobalMediaControls'
 
 # ============================================================
@@ -55,6 +58,7 @@ $T = (@{
         Startup = '自启动项'; Protocol = '协议命令'; Shortcut = '快捷方式'; Policy = '启动加速策略'
         RestartApps = '登录后重启应用'
         RestartAppsWarn = '警告: Windows "重新启动应用" 处于开启状态, 系统重启后自动恢复的 Edge 不带本参数, Global Media Controls 可能恢复(手动重开 Edge 即可消除)。运行时加 -DisableRestartApps 可关闭该功能'
+        SharedPolicy = '检测到圆角项目仍在使用 StartupBoostEnabled=0, 保留共享策略以确保兼容'
         Restarted = 'Edge 已重启并恢复会话'; ExeNotFound = '未找到 msedge.exe, 请手动重启 Edge'; Done = '完成。'
     }
     ja = @{
@@ -63,6 +67,7 @@ $T = (@{
         Startup = '自動起動エントリ'; Protocol = 'プロトコルコマンド'; Shortcut = 'ショートカット'; Policy = 'Startup Boost ポリシー'
         RestartApps = 'サインイン後のアプリ再起動'
         RestartAppsWarn = '警告: Windows の「アプリの再起動」が有効です。再起動後に自動復元される Edge にパラメータが付かず、Global Media Controls が復活する場合があります。-DisableRestartApps で無効化できます。'
+        SharedPolicy = '角丸プロジェクトが StartupBoostEnabled=0 を使用中のため、互換性維持のため共有ポリシーを保持します。'
         Restarted = 'Edge を再起動し、セッションを復元しました'; ExeNotFound = 'msedge.exe が見つかりません。Edge を手動で再起動してください'; Done = '完了。'
     }
     en = @{
@@ -71,6 +76,7 @@ $T = (@{
         Startup = 'startup entry'; Protocol = 'protocol command'; Shortcut = 'shortcut'; Policy = 'startup boost policy'
         RestartApps = 'restart apps after sign-in'
         RestartAppsWarn = 'Warning: Windows "restart apps after sign-in" is ON. A restored Edge process may not carry this flag, so Global Media Controls may return. Pass -DisableRestartApps to turn it off.'
+        SharedPolicy = 'The rounded-corner project still appears to use StartupBoostEnabled=0; keeping the shared policy for compatibility.'
         Restarted = 'Edge restarted with session restored'; ExeNotFound = 'msedge.exe not found, please restart Edge manually'; Done = 'Done.'
     }
 })[$lang]
@@ -91,27 +97,24 @@ function Remove-OurFlag([string]$v) {
     return $v.Trim()
 }
 
-# Shortcut arguments are only the argument string, so the flag can be prepended.
 function Edit-ShortcutArguments([string]$v) {
     $clean = Remove-OurFlag $v
     if ($Undo) { return $clean }
     return "$flag $clean".Trim()
 }
 
-# Startup/Run entries and protocol associations are complete command lines.
-# Keep the executable path first and insert our flag immediately after the closing
-# quote, matching the injection strategy used by edge-no-rounded-corners.
 function Edit-Command([string]$v) {
     $clean = Remove-OurFlag $v
     if ($Undo) { return $clean }
 
+    # Match the original project's placement: executable first, then arguments.
     if ($clean -match 'msedge\.exe"') {
         return $clean.Replace('msedge.exe"', "msedge.exe`" $flag")
     }
 
-    # Fallback for an unquoted executable path. This is deliberately conservative.
+    # Conservative fallback for an unquoted executable path.
     if ($clean -match '(?i)\bmsedge\.exe\b') {
-        return $clean -replace '(?i)(\bmsedge\.exe\b)', '$1 ' + $flag
+        return $clean -replace '(?i)(\bmsedge\.exe\b)', ('$1 ' + $flag)
     }
 
     return $clean
@@ -194,7 +197,7 @@ foreach ($rk in @(
 
 # ============================================================
 # 3. Edge protocol associations
-#    Keep the same classes as edge-no-rounded-corners.
+#    Same classes as edge-no-rounded-corners.
 # ============================================================
 
 foreach ($cls in @('MSEdgeHTM', 'microsoft-edge')) {
@@ -220,14 +223,64 @@ foreach ($cls in @('MSEdgeHTM', 'microsoft-edge')) {
 
 # ============================================================
 # 4. Startup Boost policy
+#    This policy is shared with edge-no-rounded-corners.
 # ============================================================
 
 $polKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
 $polVal = (Get-ItemProperty $polKey -Name StartupBoostEnabled -ErrorAction SilentlyContinue).StartupBoostEnabled
 
+function Test-RoundedCornerProjectActive {
+    $patterns = @(
+        'msForceNoRoundedCornerAndMargin',
+        'msVisualRejuvRounding',
+        'msOmniboxFocusRingRoundEmphasize'
+    )
+
+    foreach ($d in $dirs) {
+        foreach ($f in (Get-ChildItem $d -Filter *.lnk -Recurse -ErrorAction SilentlyContinue)) {
+            try {
+                $lnk = $sh.CreateShortcut($f.FullName)
+                if ($lnk.TargetPath -notlike '*msedge.exe') { continue }
+                foreach ($p in $patterns) {
+                    if ([string]$lnk.Arguments -like "*$p*") { return $true }
+                }
+            } catch { }
+        }
+    }
+
+    foreach ($rk in @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+    )) {
+        if (-not (Test-Path $rk)) { continue }
+        foreach ($name in ((Get-Item $rk).GetValueNames() | Where-Object { $_ -like 'MicrosoftEdgeAutoLaunch*' })) {
+            $v = [string]((Get-ItemProperty $rk -Name $name).$name)
+            foreach ($p in $patterns) {
+                if ($v -like "*$p*") { return $true }
+            }
+        }
+    }
+
+    foreach ($cls in @('MSEdgeHTM', 'microsoft-edge')) {
+        $key = "Registry::HKEY_CLASSES_ROOT\$cls\shell\open\command"
+        if (-not (Test-Path $key)) { continue }
+        try {
+            $v = [string](Get-ItemProperty $key).'(default)'
+            foreach ($p in $patterns) {
+                if ($v -like "*$p*") { return $true }
+            }
+        } catch { }
+    }
+
+    return $false
+}
+
 if ($Undo) {
     if ($null -eq $polVal) {
         "$($T.AlreadyOk): $($T.Policy)"
+    }
+    elseif (Test-RoundedCornerProjectActive) {
+        $T.SharedPolicy
     }
     else {
         try {
